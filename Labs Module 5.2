@@ -1,0 +1,92 @@
+#!/usr/bin/env python
+# coding: utf-8
+
+# In[ ]:
+
+
+pip install boto3 pandas sagemaker
+
+
+# In[ ]:
+
+
+import boto3
+import pandas as pd
+from sagemaker import AutoML
+from sagemaker.session import Session
+
+# Set up the SageMaker session
+sagemaker_session = Session()
+
+
+# In[ ]:
+
+
+# Prepare your dataset (assuming you have a CSV file)
+data = pd.read_csv('your_dataset.csv')
+
+# Split the data into training and testing sets
+train_data = data.sample(frac=0.8, random_state=42)
+test_data = data.drop(train_data.index)
+
+# Save the split datasets
+train_data.to_csv('train.csv', index=False)
+test_data.to_csv('test.csv', index=False)
+
+# Upload the data to S3
+bucket_name = 'your-bucket-name'
+prefix = 'automl-tabular-classification'
+
+train_s3_path = sagemaker_session.upload_data('train.csv', bucket=bucket_name, key_prefix=prefix + '/train')
+test_s3_path = sagemaker_session.upload_data('test.csv', bucket=bucket_name, key_prefix=prefix + '/test')
+
+
+# In[ ]:
+
+
+auto_ml = AutoML(
+    role='your-sagemaker-role-arn',
+    target_attribute_name='your_target_column',
+    output_path=f's3://{bucket_name}/{prefix}/output',
+    sagemaker_session=sagemaker_session,
+    max_candidates=10,
+    max_runtime_per_training_job_in_seconds=600,
+)
+
+auto_ml.fit(
+    inputs=train_s3_path,
+    job_name='automl-tabular-classification-job'
+)
+
+
+# In[ ]:
+
+
+predictor = auto_ml.deploy(
+    initial_instance_count=1,
+    instance_type='ml.m5.large',
+    endpoint_name='automl-tabular-classification-endpoint'
+)
+
+
+# In[ ]:
+
+
+# Prepare test data for prediction
+test_data_no_target = test_data.drop(columns=['your_target_column'])
+
+# Make predictions
+predictions = predictor.predict(test_data_no_target.values.tolist())
+
+# Print predictions
+print(predictions)
+
+
+# In[1]:
+
+
+# Delete the endpoint when you're done
+predictor.delete_endpoint()
+
+
+# In[ ]:
