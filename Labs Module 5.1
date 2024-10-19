@@ -1,0 +1,178 @@
+#!/usr/bin/env python
+# coding: utf-8
+
+# In[4]:
+
+
+get_ipython().system('pip install tensorflow_datasets')
+
+
+# In[ ]:
+
+
+import tensorflow as tf
+import tensorflow_datasets as tfds
+
+# Load IMDB dataset
+(train_data, test_data), info = tfds.load(
+    'imdb_reviews/subwords8k', 
+    split=(tfds.Split.TRAIN, tfds.Split.TEST),
+    as_supervised=True,
+    with_info=True)
+
+encoder = info.features['text'].encoder
+
+BUFFER_SIZE = 10000
+BATCH_SIZE = 64
+
+train_dataset = (train_data
+                 .shuffle(BUFFER_SIZE)
+                 .padded_batch(BATCH_SIZE))
+
+test_dataset = (test_data
+                .padded_batch(BATCH_SIZE))
+
+
+# In[2]:
+
+
+model = tf.keras.Sequential([
+    tf.keras.layers.Embedding(encoder.vocab_size, 64),
+    tf.keras.layers.Bidirectional(tf.keras.layers.LSTM(64)),
+    tf.keras.layers.Dense(64, activation='relu'),
+    tf.keras.layers.Dense(1)
+])
+
+model.compile(loss=tf.keras.losses.BinaryCrossentropy(from_logits=True),
+              optimizer=tf.keras.optimizers.Adam(1e-4),
+              metrics=['accuracy'])
+
+
+# In[ ]:
+
+
+history = model.fit(train_dataset, epochs=10,
+                    validation_data=test_dataset, 
+                    validation_steps=30)
+
+
+# In[ ]:
+
+
+test_loss, test_acc = model.evaluate(test_dataset)
+print('Test Loss:', test_loss)
+print('Test Accuracy:', test_acc)
+
+
+# In[ ]:
+
+
+model.save('/tmp/text_classification_model')
+
+
+# In[ ]:
+
+
+from sagemaker.tensorflow import TensorFlowModel
+
+sagemaker_model = TensorFlowModel(model_data='/tmp/text_classification_model',
+                                  role='YOUR_SAGEMAKER_ROLE_ARN',
+                                  framework_version='2.3.0')
+
+predictor = sagemaker_model.deploy(initial_instance_count=1,
+                                   instance_type='ml.t2.medium')
+
+
+# In[ ]:
+
+
+sample_text = "This movie was fantastic! I really enjoyed it and would recommend it."
+encoded_text = encoder.encode(sample_text)
+result = predictor.predict(encoded_text)
+print('Prediction:', 'Positive' if result > 0 else 'Negative')
+
+
+# In[ ]:
+
+
+predictor.delete_endpoint()
+
+
+# In[ ]:
+
+
+import matplotlib.pyplot as plt
+import numpy as np
+
+# Plot training & validation accuracy values
+plt.figure(figsize=(12,6))
+plt.plot(history.history['accuracy'])
+plt.plot(history.history['val_accuracy'])
+plt.title('Model accuracy')
+plt.ylabel('Accuracy')
+plt.xlabel('Epoch')
+plt.legend(['Train', 'Validation'], loc='upper left')
+plt.savefig('/tmp/accuracy_plot.png')
+plt.show()
+
+# Plot training & validation loss values
+plt.figure(figsize=(12,6))
+plt.plot(history.history['loss'])
+plt.plot(history.history['val_loss'])
+plt.title('Model loss')
+plt.ylabel('Loss')
+plt.xlabel('Epoch')
+plt.legend(['Train', 'Validation'], loc='upper left')
+plt.savefig('/tmp/loss_plot.png')
+plt.show()
+
+# Save final metrics
+final_accuracy = history.history['accuracy'][-1]
+final_val_accuracy = history.history['val_accuracy'][-1]
+final_loss = history.history['loss'][-1]
+final_val_loss = history.history['val_loss'][-1]
+
+metrics = {
+    'final_accuracy': final_accuracy,
+    'final_val_accuracy': final_val_accuracy,
+    'final_loss': final_loss,
+    'final_val_loss': final_val_loss,
+    'test_accuracy': test_acc,
+    'test_loss': test_loss
+}
+
+import json
+with open('/tmp/model_metrics.json', 'w') as f:
+    json.dump(metrics, f)
+
+print("Final Training Accuracy:", final_accuracy)
+print("Final Validation Accuracy:", final_val_accuracy)
+print("Test Accuracy:", test_acc)
+
+
+# In[ ]:
+
+
+import boto3
+from sagemaker import get_execution_role
+
+role = get_execution_role()
+bucket = boto3.client('s3').create_bucket(Bucket=f'sagemaker-{boto3.client("sts").get_caller_identity().get("Account")}-{boto3.session.Session().region_name}')
+bucket_name = bucket['Location'][1:]
+
+s3 = boto3.resource('s3')
+
+# Save model
+s3.Bucket(bucket_name).upload_file('/tmp/text_classification_model', 'text_classification_model')
+
+# Save metrics
+s3.Bucket(bucket_name).upload_file('/tmp/model_metrics.json', 'model_metrics.json')
+
+# Save plots
+s3.Bucket(bucket_name).upload_file('/tmp/accuracy_plot.png', 'accuracy_plot.png')
+s3.Bucket(bucket_name).upload_file('/tmp/loss_plot.png', 'loss_plot.png')
+
+print(f"Model artifacts and results saved to s3://{bucket_name}/")
+
+
+# In[ ]:
