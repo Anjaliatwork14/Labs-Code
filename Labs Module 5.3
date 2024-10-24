@@ -1,0 +1,36 @@
+!pip install scikit-learn pandas boto3
+from sklearn.datasets import load_iris
+from sklearn.model_selection import train_test_split
+
+# Load dataset
+iris = load_iris()
+X = iris.data
+y = iris.target
+
+# Split dataset into training and testing sets
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import accuracy_score
+
+# Initialize the model
+model = RandomForestClassifier(random_state=42)
+model.fit(X_train, y_train)
+y_pred = model.predict(X_test)
+print(f"Baseline accuracy: {accuracy_score(y_test, y_pred)}")from sklearn.model_selection import GridSearchCV
+
+# Define the hyperparameter grid
+param_grid = {
+    'n_estimators': [50, 100, 200],
+    'max_depth': [None, 10, 20, 30],
+    'min_samples_split': [2, 5, 10]
+}
+grid_search = GridSearchCV(estimator=model, param_grid=param_grid, cv=3, verbose=2, n_jobs=-1)
+grid_search.fit(X_train, y_train)
+  GridSearchCV?i
+best_estimator_: RandomForestClassifier
+
+ RandomForestClassifier
+ print(f"Best Hyperparameters: {grid_search.best_params_}")
+ best_model = grid_search.best_estimator_
+y_pred = best_model.predict(X_test)
+print(f"Best Model Accuracy: {accuracy_score(y_test, y_pred)}")
